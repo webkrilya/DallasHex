@@ -1,0 +1,110 @@
+/* 
+Тестировалось на Arduino IDE 1.8.0
+Дата тестирования 26.07.2017г.
+*/ 
+#include <ESP8266HTTPClient.h>
+#include <ESP8266WiFi.h>                                // Подключаем библиотеку ESP8266WiFi
+#include <OneWire.h>                                    // Подключаем библиотеку Wire
+#include <DallasTemperature.h>                          // Подключаем библиотеку DallasTemperature
+
+const char* ssid = "ELTX-2.4GHz_WiFi_AAAC";               // Название Вашей WiFi сети
+const char* password = "GP2F022894";          // Пароль от Вашей WiFi сети
+
+#define ONE_WIRE_BUS 2                                  // Указываем, к какому выводу подключена датчик
+OneWire oneWire(ONE_WIRE_BUS);
+DallasTemperature DS18B20(&oneWire);
+WiFiServer server(80);                                  // Указываем порт Web-сервера
+
+int deviceCount = 0;
+float tempC;
+
+
+void setup() 
+{
+  Serial.begin(115200);                                 // Скорость передачи 115200 
+  delay(10);                                            // Пауза 10 мкс
+  DS18B20.begin();                                      // Инициализация DS18B20
+
+  Serial.print("Locating devices...");
+  Serial.print("Found ");
+  deviceCount = DS18B20.getDeviceCount();
+  Serial.print(deviceCount, DEC);
+  Serial.println(" devices.");
+  Serial.println("");
+
+                             
+  Serial.println("");                                   // Печать пустой строки 
+  Serial.print("Connecting to ");                       // Печать "Подключение к:"
+  Serial.println(ssid);                                 // Печать "Название Вашей WiFi сети"
+  
+  WiFi.begin(ssid, password);                           // Подключение к WiFi Сети
+
+  
+  while (WiFi.status() != WL_CONNECTED)                 // Проверка подключения к WiFi сети
+  {
+   delay(500);                                          // Пауза 500 мкс
+   Serial.print(".");                                   // Печать "."
+  }
+   Serial.println("");                                  // Печать пустой строки                                          
+   Serial.println("WiFi connected");                    // Печать "Подключение к WiFi сети осуществлено"
+   //server.begin();                                      // Запуск Web сервера
+   //Serial.println("Web server running.");               // Печать "Веб-сервер запущен"
+   delay(10000);                                        // Пауза 10 000 мкс
+   Serial.println(WiFi.localIP());                      // Печатаем полученный IP-адрес ESP
+}
+
+
+char buff[10];
+
+void loop() 
+{
+ if (WiFi.status() == WL_CONNECTED) { //Check WiFi connection status
+
+    
+
+    
+    DS18B20.requestTemperatures();  
+ 
+    HTTPClient http;    //Declare object of class HTTPClient
+ 
+    http.begin("http://94.73.238.150:9091/metrics/job/dallas_job");      //Specify request destination
+    http.addHeader("Content-Type", "text/plain");  //Specify content-type header
+
+
+    String poster = "";
+
+  for (int i = 0;  i < deviceCount;  i++)
+  {
+    Serial.print("Sensor ");
+    Serial.print(i+1);
+    Serial.print(" : ");
+    tempC = DS18B20.getTempCByIndex(i);
+    Serial.print(tempC);
+
+    dtostrf(tempC, 4, 2, buff);
+    poster = poster + "dallas_example_metric{SensorId=\""+String(i)+"\"} "+buff+"\n";
+//    if (i<deviceCount-1) poster = poster + "\n";
+  }
+
+   // poster  = poster.substring(0, poster.length()-1);
+    
+  
+ 
+    int httpCode = http.POST(poster);   //Send the request
+    Serial.println(poster);
+    String payload = http.getString();                  //Get the response payload
+ 
+    Serial.println(httpCode);   //Print HTTP return code
+    Serial.println(payload);    //Print request response payload
+ 
+    http.end();  //Close connection
+ 
+  } else {
+ 
+    Serial.println("Error in WiFi connection");
+ 
+  }
+ 
+  delay(5000);  //Send a request every 30 seconds
+
+}
