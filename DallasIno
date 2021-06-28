@@ -1,30 +1,67 @@
-/* 
-Тестировалось на Arduino IDE 1.8.0
-Дата тестирования 26.07.2017г.
-*/ 
 #include <ESP8266HTTPClient.h>
-#include <ESP8266WiFi.h>                                // Подключаем библиотеку ESP8266WiFi
-#include <OneWire.h>                                    // Подключаем библиотеку Wire
-#include <DallasTemperature.h>                          // Подключаем библиотеку DallasTemperature
+//#include <ESP8266WiFi.h>
+#include <EEPROM.h>
+#include <ESP8266WebServer.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
 
-const char* ssid = "ELTX-2.4GHz_WiFi_AAAC";               // Название Вашей WiFi сети
-const char* password = "GP2F022894";          // Пароль от Вашей WiFi сети
+void write_string_EEPROM (int Addr, String Str) {
+  byte lng = Str.length();
+  EEPROM.begin (256);
+  if (lng > 250 )  lng = 0;
+  EEPROM.write(Addr , lng);
+  unsigned char* buf = new unsigned char[250];
+  Str.getBytes(buf, lng + 1);
+  Addr++;
+  for (byte i = 0; i < lng; i++) {
+    EEPROM.write(Addr + i, buf[i]);
+    delay(10);
+  }
+  EEPROM.end();
+}
+
+char *read_string_EEPROM (int Addr) {
+  EEPROM.begin(256);
+  byte lng = EEPROM.read(Addr);
+  char* buf = new char[250];
+  Addr++;
+  for (byte i = 0; i < lng; i++) buf[i] = char(EEPROM.read(i + Addr));
+  buf[lng] = '\x0';
+  EEPROM.end();
+  return buf;
+}
+
+
+
+IPAddress ip(192, 168, 4, 1);
+ESP8266WebServer server(ip, 80);
+String header;
+char *epr;
 
 #define ONE_WIRE_BUS 2                                  // Указываем, к какому выводу подключена датчик
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature DS18B20(&oneWire);
-WiFiServer server(80);                                  // Указываем порт Web-сервера
-
 int deviceCount = 0;
 float tempC;
+char buff[10];
+
+String ssid = "";
+String password = "";
+String endpoint = "";
+
+void setup() {
+  Serial.begin(115200);
+  Serial.print(epr);
+  Serial.print("Setting AP (Access Point)…");
+  WiFi.softAP("ESP");
+  IPAddress IP = WiFi.softAPIP();
+  Serial.print("AP IP address: ");
+  Serial.println(IP);
+  server.on("/", handler);
+  server.begin();
 
 
-void setup() 
-{
-  Serial.begin(115200);                                 // Скорость передачи 115200 
-  delay(10);                                            // Пауза 10 мкс
   DS18B20.begin();                                      // Инициализация DS18B20
-
   Serial.print("Locating devices...");
   Serial.print("Found ");
   deviceCount = DS18B20.getDeviceCount();
@@ -32,79 +69,201 @@ void setup()
   Serial.println(" devices.");
   Serial.println("");
 
-                             
-  Serial.println("");                                   // Печать пустой строки 
+
+
+
+  epr = read_string_EEPROM(0);
+  int i;
+  for (i = 0; i < 250; i++) {
+    if (epr[i] == '\n') break;
+    ssid += epr[i];
+  }
+
+  int j;
+  for (j = i + 1; j < 250; j++) {
+    if (epr[j] == '\n') {
+      break;
+    }
+    password += epr[j];
+  }
+
+  for (int j2 = j + 1; j2 < 250; j2++) {
+    if (epr[j2] == '\n') {
+      break;
+    }
+    endpoint += epr[j2];
+  }
+
+
+
   Serial.print("Connecting to ");                       // Печать "Подключение к:"
   Serial.println(ssid);                                 // Печать "Название Вашей WiFi сети"
-  
+
   WiFi.begin(ssid, password);                           // Подключение к WiFi Сети
 
-  
+
+  int x = 0;
   while (WiFi.status() != WL_CONNECTED)                 // Проверка подключения к WiFi сети
   {
-   delay(500);                                          // Пауза 500 мкс
-   Serial.print(".");                                   // Печать "."
+    delay(500);                                          // Пауза 500 мкс
+    Serial.print(".");                                   // Печать "."
+    x++;
+    if (x > 20) {
+      Serial.println("WiFi NOT connected");
+      break;
+    }
   }
-   Serial.println("");                                  // Печать пустой строки                                          
-   Serial.println("WiFi connected");                    // Печать "Подключение к WiFi сети осуществлено"
-   //server.begin();                                      // Запуск Web сервера
-   //Serial.println("Web server running.");               // Печать "Веб-сервер запущен"
-   delay(10000);                                        // Пауза 10 000 мкс
-   Serial.println(WiFi.localIP());                      // Печатаем полученный IP-адрес ESP
+  if (x < 20) {
+    Serial.println("");                                  // Печать пустой строки
+    Serial.println("WiFi connected");                    // Печать "Подключение к WiFi сети осуществлено"
+  }
+
 }
 
 
-char buff[10];
-
-void loop() 
+void handler()
 {
- if (WiFi.status() == WL_CONNECTED) { //Check WiFi connection status
+  Serial.println("Handle!");
 
-    
-
-    
-    DS18B20.requestTemperatures();  
- 
-    HTTPClient http;    //Declare object of class HTTPClient
- 
-    http.begin("http://94.73.238.150:9091/metrics/job/dallas_job");      //Specify request destination
-    http.addHeader("Content-Type", "text/plain");  //Specify content-type header
-
-
-    String poster = "";
-
-  for (int i = 0;  i < deviceCount;  i++)
+  String s;
+  byte cnt;
+  cnt = 0;
+  s = "";
+  for (int i = 0; i < server.args(); i++)
   {
-    Serial.print("Sensor ");
-    Serial.print(i+1);
-    Serial.print(" : ");
-    tempC = DS18B20.getTempCByIndex(i);
-    Serial.print(tempC);
-
-    dtostrf(tempC, 4, 2, buff);
-    poster = poster + "dallas_example_metric{SensorId=\""+String(i)+"\"} "+buff+"\n";
-//    if (i<deviceCount-1) poster = poster + "\n";
+    if (server.argName(i) == "ssid") {
+      Serial.println("Ssid detected");
+      s = s + server.arg(i);
+      s = s + "\n";
+      cnt++;
+    }
+    if (server.argName(i) == "password") {
+      Serial.println("Pass detected");
+      s = s + server.arg(i);
+      s = s + "\n";
+      cnt++;
+    }
+    if (server.argName(i) == "endpoint") {
+      Serial.println("Endpoint detected");
+      s = s + server.arg(i);
+      s = s + "\n";
+      cnt++;
+    }
   }
 
-   // poster  = poster.substring(0, poster.length()-1);
-    
-  
- 
-    int httpCode = http.POST(poster);   //Send the request
-    Serial.println(poster);
-    String payload = http.getString();                  //Get the response payload
- 
-    Serial.println(httpCode);   //Print HTTP return code
-    Serial.println(payload);    //Print request response payload
- 
-    http.end();  //Close connection
- 
+
+  if (cnt == 3) {
+
+    if (s.length() < 250) {
+
+      int less = 250 - s.length();
+
+      Serial.println("Lower then 250");
+      for (int i = 0; i < less; i++)
+      {
+        s = s + "\n";
+      }
+    }
+    Serial.print("Now ," + s + ":");
+    Serial.println(s.length());
+
+
+    if (s.length() == 250) {
+      Serial.println("All is ok!" + s);
+      write_string_EEPROM(0, s);
+    }
   } else {
- 
-    Serial.println("Error in WiFi connection");
- 
+    Serial.print("Not 3,");
+    Serial.println(cnt);
   }
- 
-  delay(5000);  //Send a request every 30 seconds
+
+  epr = read_string_EEPROM(0);
+
+
+  String answ;
+  answ = "";
+  answ += "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"UTF-8\"><title>Server setup</title></head><body><style>.container{margin: 0 auto;width: 30%;margin-top: 100px;}";
+  answ += "label{display: block;font-size: 12px;}input{border-radius: 4px;border: 1px #555 solid;padding: 5px;margin-top: 7px;}button{display: block;margin: 10px 1px;}";
+  answ += "</style><div class=\"container\"><form><label>SSID</label><input type=\"text\" name=\"ssid\" value=\"";
+  int i;
+  for (i = 0; i < 250; i++) {
+    if (epr[i] == '\n') break;
+    answ += epr[i];
+  }
+  answ += "\"><label>Password</label><input type=\"text\" name=\"password\" value=\"";
+  int j;
+  for (j = i + 1; j < 250; j++) {
+    if (epr[j] == '\n') {
+      break;
+    }
+    answ += epr[j];
+  }
+
+  answ += "\"><label>Endpoint</label><input type=\"text\" name=\"endpoint\" value=\"";
+  for (int j2 = j + 1; j2 < 250; j2++) {
+    if (epr[j2] == '\n') {
+      break;
+    }
+    answ += epr[j2];
+  }
+  answ += "\">";
+  answ += "<button type=\"submit\">Save</button></form></div></body></html>";
+  server.send(200, "text/html", answ);
+
+
+}
+
+
+unsigned int cn = 0;
+
+void loop() {
+  delay(1);
+  cn++;
+
+  server.handleClient();
+
+  if (cn > 1000)
+  {
+    cn = 0;
+    if (WiFi.status() == WL_CONNECTED) { //Check WiFi connection status
+
+
+      WiFiClient client;
+      DS18B20.requestTemperatures();
+      HTTPClient http;    //Declare object of class HTTPClient
+      http.begin(client, endpoint);      //Specify request destination
+      //"http://94.73.238.150:9091/metrics/job/dallas_job"
+      http.addHeader("Content-Type", "text/plain");  //Specify content-type header
+
+      String poster = "";
+
+      for (int i = 0;  i < deviceCount;  i++)
+      {
+        Serial.print("Sensor ");
+        Serial.print(i + 1);
+        Serial.print(" : ");
+        tempC = DS18B20.getTempCByIndex(i);
+        Serial.print(tempC);
+
+        dtostrf(tempC, 4, 2, buff);
+        poster = poster + "dallas_example_metric{SensorId=\"" + String(i) + "\"} " + buff + "\n";
+        //    if (i<deviceCount-1) poster = poster + "\n";
+      }
+
+      // poster  = poster.substring(0, poster.length()-1);
+
+
+
+      int httpCode = http.POST(poster);   //Send the request
+      Serial.println(poster);
+      String payload = http.getString();                  //Get the response payload
+
+      Serial.println(httpCode);   //Print HTTP return code
+      Serial.println(payload);    //Print request response payload
+
+      http.end();  //Close connection
+
+    }
+  }
 
 }
